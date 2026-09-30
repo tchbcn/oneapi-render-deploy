@@ -22,7 +22,7 @@ restore() {
   local resp dl
   resp="$(curl -fsSL --max-time 30 -H "Authorization: token $GITHUB_TOKEN" \
     "https://api.github.com/repos/$GITHUB_REPO/contents/$REMOTE_PATH?ref=$BRANCH" || true)"
-  if [[ -n "$resp" ]] && echo "$resp" | grep -q '"download_url"'; then
+  if [[ -n "$resp" ]] && [[ "$resp" == *'"download_url"'* ]]; then
     dl="$(echo "$resp" | sed -n 's/.*"download_url": *"\([^"]*\)".*/\1/p')"
     curl -fsSL --max-time 60 -o "$DB_FILE.restored" "$dl" || true
     if [[ -s "$DB_FILE.restored" ]]; then
@@ -76,7 +76,7 @@ backup() {
   local sha="" resp
   resp="$(curl -fsSL --max-time 30 -H "Authorization: token $GITHUB_TOKEN" \
     "https://api.github.com/repos/$GITHUB_REPO/contents/$REMOTE_PATH?ref=$BRANCH" || true)"
-  if [[ -n "$resp" ]] && echo "$resp" | grep -q '"sha"'; then
+  if [[ -n "$resp" ]] && [[ "$resp" == *'"sha"'* ]]; then
     sha="$(echo "$resp" | sed -n 's/.*"sha": *"\([^"]*\)".*/\1/p')"
   fi
 
@@ -110,3 +110,4 @@ while true; do
   backup
   sleep "$BACKUP_INTERVAL"
 done
+
