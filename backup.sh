@@ -7,7 +7,7 @@ set -euo pipefail
 DB_FILE="${DB_FILE:-/app/oneapi.db}"
 GITHUB_REPO="${GITHUB_REPO:-}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
-BACKUP_INTERVAL="${BACKUP_INTERVAL:-300}"  # 5min in seconds (quick backup for testing)
+BACKUP_INTERVAL="${BACKUP_INTERVAL:-300}"  # 5min in seconds
 BRANCH="main"
 REMOTE_PATH="oneapi.db"
 
@@ -37,12 +37,41 @@ restore() {
   fi
 }
 
+# Create a consistent snapshot including WAL data.
+# Returns snapshot path in $SNAP or exits 1 if the db is empty/invalid.
+snapshot() {
+  local tmp=/tmp/oneapi-backup.db
+  # 1) checkpoint WAL into main db (helps fallback paths capture data)
+  sqlite3 "$DB_FILE" "PRAGMA wal_checkpoint(FULL);" >/dev/null 2>&1 || true
+  # 2) online backup to tmp (handles WAL correctly)
+  rm -f "$tmp"
+  if ! sqlite3 "$DB_FILE" ".backup $tmp" >/dev/null 2>&1; then
+    # fallback: VACUUM INTO produces a consistent snapshot too
+    if ! sqlite3 "$DB_FILE" "VACUUM INTO '$tmp';" >/dev/null 2>&1; then
+      # last resort: raw copy (may miss WAL data if not check-pointed)
+      cp "$DB_FILE" "$tmp" || return 1
+    fi
+  fi
+  # 3) validate: must have at least one table and reasonable size
+  local tbls
+  tbls="$(sqlite3 "$tmp" "SELECT count(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo 0)"
+  if [[ "${tbls:-0}" == "0" ]]; then
+    echo "[backup] WARN: snapshot has 0 tables - skipping push (db not initialized?)"
+    return 1
+  fi
+  SNAP="$tmp"
+  return 0
+}
+
 backup() {
   echo "[backup] backing up $DB_FILE ..."
-  local tmp=/tmp/oneapi-backup.db
-  sqlite3 "$DB_FILE" ".backup '$tmp'" 2>/dev/null || cp "$DB_FILE" "$tmp"
+  local SNAP=""
+  if ! snapshot; then
+    echo "[backup] skip: no valid snapshot (db empty / oneapi not ready)"
+    return 0
+  fi
   local content_b64
-  content_b64="$(base64 -w0 "$tmp" 2>/dev/null || base64 "$tmp" | tr -d '\n')"
+  content_b64="$(base64 -w0 "$SNAP" 2>/dev/null || base64 "$SNAP" | tr -d '\n')"
 
   local sha="" resp
   resp="$(curl -fsSL --max-time 30 -H "Authorization: token $GITHUB_TOKEN" \
@@ -51,23 +80,25 @@ backup() {
     sha="$(echo "$resp" | sed -n 's/.*"sha": *"\([^"]*\)".*/\1/p')"
   fi
 
-  # Build JSON payload with python3 (always emits valid JSON, null sha on create)
   local payload
-  payload="$(SHA="$sha" python3 - <<'PYEOF'
+  payload="$(SHA="$sha" SNAP="$SNAP" python3 - <<'PYEOF'
 import json, base64, os
-with open('/tmp/oneapi-backup.db', 'rb') as f:
+with open(os.environ['SNAP'], 'rb') as f:
     b64 = base64.b64encode(f.read()).decode()
 sha = os.environ.get('SHA', '') or None
 print(json.dumps({"message": "oneapi.db backup", "content": b64, "branch": "main", "sha": sha}))
 PYEOF
 )"
 
-  curl -fsSL --max-time 60 -X PUT \
+  if curl -fsSL --max-time 60 -X PUT \
     -H "Authorization: token $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github+json" \
     -d "$payload" \
-    "https://api.github.com/repos/$GITHUB_REPO/contents/$REMOTE_PATH" >/dev/null 2>&1 \
-    && echo "[backup] pushed to $GITHUB_REPO" || echo "[backup] push failed"
+    "https://api.github.com/repos/$GITHUB_REPO/contents/$REMOTE_PATH" >/dev/null 2>&1; then
+    echo "[backup] pushed to $GITHUB_REPO ($(stat -c%s "$SNAP") bytes)"
+  else
+    echo "[backup] push failed"
+  fi
 }
 
 if [[ "${1:-}" == "--restore" ]]; then
