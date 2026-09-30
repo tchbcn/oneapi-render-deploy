@@ -90,13 +90,16 @@ print(json.dumps({"message": "oneapi.db backup", "content": b64, "branch": "main
 PYEOF
 )"
 
+  echo "$payload" > /tmp/push-payload.json
   if curl -fsSL --max-time 60 -X PUT \
     -H "Authorization: token $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github+json" \
-    -d "$payload" \
+    --data-binary @/tmp/push-payload.json \
     "https://api.github.com/repos/$GITHUB_REPO/contents/$REMOTE_PATH" >/dev/null 2>&1; then
+    rm -f /tmp/push-payload.json
     echo "[backup] pushed to $GITHUB_REPO ($(stat -c%s "$SNAP") bytes)"
   else
+    rm -f /tmp/push-payload.json
     echo "[backup] push failed"
   fi
 }
