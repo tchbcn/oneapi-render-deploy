@@ -1,13 +1,13 @@
 #!/bin/bash
 # OneAPI database backup/restore via GitHub API
 # Uses env: GITHUB_TOKEN (repo write scope), GITHUB_REPO (e.g. "user/oneapi-backup"),
-#        DB_FILE (default ./oneapi.db), BACKUP_INTERVAL (default 6h)
+#        DB_FILE (default ./oneapi.db), BACKUP_INTERVAL (default 5min)
 set -euo pipefail
 
 DB_FILE="${DB_FILE:-/app/oneapi.db}"
 GITHUB_REPO="${GITHUB_REPO:-}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
-BACKUP_INTERVAL="${BACKUP_INTERVAL:-21600}"  # 6h in seconds
+BACKUP_INTERVAL="${BACKUP_INTERVAL:-300}"  # 5min in seconds (quick backup for testing)
 BRANCH="main"
 REMOTE_PATH="oneapi.db"
 
