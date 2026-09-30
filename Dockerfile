@@ -21,5 +21,8 @@ EXPOSE 3000
 COPY backup.sh /app/backup.sh
 RUN chmod +x /app/backup.sh
 
-# Start oneapi, run samcommand tunnel in background, keep backup loop
-CMD ["/bin/bash", "-c", "/app/backup.sh --restore && /app/oneapi & /usr/local/bin/samcommand --no-p2p --verbose 2>&1 | tee /tmp/samcommand.log & exec /app/backup.sh --loop"]
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# start.sh handles correct startup order: restore db -> oneapi -> samcommand -> backup loop
+CMD ["/bin/bash", "/app/start.sh"]
